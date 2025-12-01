@@ -24,11 +24,11 @@ def parse_arguments():
     parser = argparse.ArgumentParser()
     # Tuples: (name, type, default)
     arguments = [
-        ('root', str, '/data/group_data/katefgroup/VLA/Peract_packaged/'),
-        ('tgt', str, '/data/user_data/ngkanats/zarr_datasets/Peract_dat_zarr/')
+        ("root", str, "/data/group_data/katefgroup/VLA/Peract_packaged/"),
+        ("tgt", str, "/data/user_data/ngkanats/zarr_datasets/Peract_dat_zarr/"),
     ]
     for arg in arguments:
-        parser.add_argument(f'--{arg[0]}', type=arg[1], default=arg[2])
+        parser.add_argument(f"--{arg[0]}", type=arg[1], default=arg[2])
 
     return parser.parse_args()
 
@@ -53,7 +53,7 @@ def all_tasks_main(split, tasks):
     task2id = {task: t for t, task in enumerate(tasks)}
 
     # Initialize zarr
-    compressor = Blosc(cname='lz4', clevel=1, shuffle=Blosc.SHUFFLE)
+    compressor = Blosc(cname="lz4", clevel=1, shuffle=Blosc.SHUFFLE)
     with zarr.open_group(filename, mode="w") as zarr_file:
 
         def _create(field, shape, dtype):
@@ -62,7 +62,7 @@ def all_tasks_main(split, tasks):
                 shape=(0,) + shape,
                 chunks=(STORE_EVERY,) + shape,
                 compressor=compressor,
-                dtype=dtype
+                dtype=dtype,
             )
 
         _create("rgb", (NCAM, 3, IM_SIZE, IM_SIZE), "uint8")
@@ -77,12 +77,10 @@ def all_tasks_main(split, tasks):
             print(task)
             episodes = []
             for var in range(0, 199):
-                _path = Path(f'{ROOT}{split}/{task}+{var}/')
+                _path = Path(f"{ROOT}/{split}/{task}+{var}/")
                 if not _path.is_dir():
                     continue
-                episodes.extend([
-                    (ep, var) for ep in sorted(_path.glob("*.dat"))
-                ])
+                episodes.extend([(ep, var) for ep in sorted(_path.glob("*.dat"))])
             for ep, var in tqdm(episodes):
                 # Read
                 with open(ep, "rb") as f:
@@ -92,52 +90,53 @@ def all_tasks_main(split, tasks):
                 # Keep point cloud as it's hard to reverse
                 pcd = content[1][:, :, 1].astype(np.float16)
                 # Store current eef pose as well as two previous ones
-                prop = np.stack([
-                    to_numpy(tens).astype(np.float32) for tens in content[4]
-                ])
+                prop = np.stack(
+                    [to_numpy(tens).astype(np.float32) for tens in content[4]]
+                )
                 prop_1 = np.concatenate([prop[:1], prop[:-1]])
                 prop_2 = np.concatenate([prop_1[:1], prop_1[:-1]])
                 prop = np.concatenate([prop_2, prop_1, prop], 1)
                 prop = prop.reshape(len(prop), 3, NHAND, 8)
                 # Next keypose (concatenate curr eef to form a "trajectory")
-                actions = np.stack([
-                    to_numpy(tens).astype(np.float32) for tens in content[2]
-                ]).reshape(len(content[2]), 1, NHAND, 8)
+                actions = np.stack(
+                    [to_numpy(tens).astype(np.float32) for tens in content[2]]
+                ).reshape(len(content[2]), 1, NHAND, 8)
                 # Task ids and variation ids
                 tids = np.array([task2id[task]] * len(content[0])).astype(np.uint8)
                 _vars = np.array([var] * len(content[0])).astype(np.uint8)
 
                 # write
-                zarr_file['rgb'].append(rgb)
-                zarr_file['pcd'].append(pcd)
-                zarr_file['proprioception'].append(prop)
-                zarr_file['action'].append(actions)
-                zarr_file['task_id'].append(tids)
-                zarr_file['variation'].append(_vars)
+                zarr_file["rgb"].append(rgb)
+                zarr_file["pcd"].append(pcd)
+                zarr_file["proprioception"].append(prop)
+                zarr_file["action"].append(actions)
+                zarr_file["task_id"].append(tids)
+                zarr_file["variation"].append(_vars)
                 assert all(
-                    len(zarr_file['action']) == len(zarr_file[key])
+                    len(zarr_file["action"]) == len(zarr_file[key])
                     for key in zarr_file.keys()
                 )
 
 
 if __name__ == "__main__":
     tasks = [
-        "place_cups", "close_jar", "insert_onto_square_peg",
-        "light_bulb_in", "meat_off_grill", "open_drawer",
-        "place_shape_in_shape_sorter", "place_wine_at_rack_location",
-        "push_buttons", "put_groceries_in_cupboard",
-        "put_item_in_drawer", "put_money_in_safe", "reach_and_drag",
-        "slide_block_to_color_target", "stack_blocks", "stack_cups",
-        "sweep_to_dustpan_of_size", "turn_tap"
+        # "place_cups", "close_jar", "insert_onto_square_peg",
+        # "light_bulb_in", "meat_off_grill", "open_drawer",
+        # "place_shape_in_shape_sorter", "place_wine_at_rack_location",
+        # "push_buttons",
+        "put_groceries_in_cupboard",
+        # "put_item_in_drawer", "put_money_in_safe", "reach_and_drag",
+        # "slide_block_to_color_target", "stack_blocks", "stack_cups",
+        # "sweep_to_dustpan_of_size", "turn_tap"
     ]
     args = parse_arguments()
     ROOT = args.root
     STORE_PATH = args.tgt
     # Create zarr data
-    for split in ['train', 'val']:
+    for split in ["train", "val"]:
         all_tasks_main(split, tasks)
     # Store instructions as json (can be run independently)
-    os.makedirs('instructions/peract', exist_ok=True)
-    instr_dict = store_instructions(ROOT, tasks, ['train', 'val', 'test'])
-    with open('instructions/peract/instructions.json', 'w') as fid:
+    os.makedirs("instructions/peract", exist_ok=True)
+    instr_dict = store_instructions(ROOT, tasks, ["train", "val", "test"])
+    with open("instructions/peract/instructions.json", "w") as fid:
         json.dump(instr_dict, fid)

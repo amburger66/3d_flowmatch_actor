@@ -1,15 +1,17 @@
 main_dir=Peract
+wandb_project_name=RobotSmith-3dfa
+wandb_run_name=put_groceries_in_cupboard
 
-DATA_PATH=/data/user_data/ngkanats
+DATA_PATH=/home/amli/research/RobotSmith/models/3dfa
 
-train_data_dir=$DATA_PATH/zarr_datasets/peract/train.zarr/
-eval_data_dir=$DATA_PATH/zarr_datasets/peract/val.zarr/
+train_data_dir=$DATA_PATH/zarr_datasets/peract/train.zarr
+eval_data_dir=$DATA_PATH/zarr_datasets/peract/val.zarr
 train_instructions=instructions/peract/instructions.json
 val_instructions=instructions/peract/instructions.json
 
 dataset=PeractTwoCam
 num_workers=4
-B=64  # we used 64 but you can use as low as 16 without much performance drop - it's much faster
+B=16  # we used 64 but you can use as low as 16 without much performance drop - it's much faster
 B_val=64
 chunk_size=1
 memory_limit=8  # this means 8GB CPU RAM per worker per GPU,
@@ -59,6 +61,8 @@ ngpus=1  # we used 4
 
 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     main.py \
+    --wandb_project_name $wandb_project_name \
+    --wandb_run_name $wandb_run_name \
     --train_data_dir $train_data_dir \
     --eval_data_dir $eval_data_dir \
     --train_instructions $train_instructions \
@@ -69,8 +73,6 @@ torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --batch_size_val $B_val \
     --chunk_size $chunk_size \
     --memory_limit $memory_limit \
-    --exp_log_dir $main_dir \
-    --run_log_dir ${run_log_dir} \
     --checkpoint $checkpoint \
     --val_freq $val_freq \
     --eval_only $eval_only \

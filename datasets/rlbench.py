@@ -5,34 +5,36 @@ from .base import BaseDataset
 
 
 PERACT_TASKS = [
-    "place_cups", "close_jar", "insert_onto_square_peg",
-    "light_bulb_in", "meat_off_grill", "open_drawer",
-    "place_shape_in_shape_sorter", "place_wine_at_rack_location",
-    "push_buttons", "put_groceries_in_cupboard",
-    "put_item_in_drawer", "put_money_in_safe", "reach_and_drag",
-    "slide_block_to_color_target", "stack_blocks", "stack_cups",
-    "sweep_to_dustpan_of_size", "turn_tap"
+    # "place_cups", "close_jar", "insert_onto_square_peg",
+    # "light_bulb_in", "meat_off_grill", "open_drawer",
+    # "place_shape_in_shape_sorter", "place_wine_at_rack_location",
+    # "push_buttons",
+    "put_groceries_in_cupboard",
+    # "put_item_in_drawer", "put_money_in_safe", "reach_and_drag",
+    # "slide_block_to_color_target", "stack_blocks", "stack_cups",
+    # "sweep_to_dustpan_of_size", "turn_tap"
 ]
 PERACT2_TASKS = [
-    'bimanual_push_box',
-    'bimanual_lift_ball',
-    'bimanual_dual_push_buttons',
-    'bimanual_pick_plate',
-    'bimanual_put_item_in_drawer',
-    'bimanual_put_bottle_in_fridge',
-    'bimanual_handover_item',
-    'bimanual_pick_laptop',
-    'bimanual_straighten_rope',
-    'bimanual_sweep_to_dustpan',
-    'bimanual_lift_tray',
-    'bimanual_handover_item_easy',
-    'bimanual_take_tray_out_of_oven'
+    "bimanual_push_box",
+    "bimanual_lift_ball",
+    "bimanual_dual_push_buttons",
+    "bimanual_pick_plate",
+    "bimanual_put_item_in_drawer",
+    "bimanual_put_bottle_in_fridge",
+    "bimanual_handover_item",
+    "bimanual_pick_laptop",
+    "bimanual_straighten_rope",
+    "bimanual_sweep_to_dustpan",
+    "bimanual_lift_tray",
+    "bimanual_handover_item_easy",
+    "bimanual_take_tray_out_of_oven",
 ]
 
 
 class RLBenchDataset(BaseDataset):
     """RLBench dataset."""
-    quat_format= 'xyzw'
+
+    quat_format = "xyzw"
 
     def __init__(
         self,
@@ -42,7 +44,7 @@ class RLBenchDataset(BaseDataset):
         relative_action=False,
         mem_limit=8,
         actions_only=False,
-        chunk_size=4
+        chunk_size=4,
     ):
         super().__init__(
             root=root,
@@ -51,34 +53,34 @@ class RLBenchDataset(BaseDataset):
             relative_action=relative_action,
             mem_limit=mem_limit,
             actions_only=actions_only,
-            chunk_size=chunk_size
+            chunk_size=chunk_size,
         )
 
     def _get_task(self, idx):
         return [
             self.tasks[int(tid)]
-            for tid in self.annos['task_id'][idx:idx + self.chunk_size]
+            for tid in self.annos["task_id"][idx : idx + self.chunk_size]
         ]
 
     def _get_instr(self, idx):
         return [
             random.choice(self._instructions[self.tasks[int(t)]][str(int(v))])
             for t, v in zip(
-                self.annos['task_id'][idx:idx + self.chunk_size],
-                self.annos['variation'][idx:idx + self.chunk_size]
+                self.annos["task_id"][idx : idx + self.chunk_size],
+                self.annos["variation"][idx : idx + self.chunk_size],
             )
         ]
 
     def _get_rgb2d(self, idx):
         if self.camera_inds2d is not None:
-            return self._get_attr_by_idx(idx, 'rgb', False)[:, self.camera_inds2d]
+            return self._get_attr_by_idx(idx, "rgb", False)[:, self.camera_inds2d]
         return None
 
     def _get_extrinsics(self, idx):
-        return self._get_attr_by_idx(idx, 'extrinsics', True)
+        return self._get_attr_by_idx(idx, "extrinsics", True)
 
     def _get_intrinsics(self, idx):
-        return self._get_attr_by_idx(idx, 'intrinsics', True)
+        return self._get_attr_by_idx(idx, "intrinsics", True)
 
     def __getitem__(self, idx):
         """
@@ -94,7 +96,7 @@ class RLBenchDataset(BaseDataset):
         }
         """
         # First detect which copy we fall into
-        idx = idx % (len(self.annos['action']) // self.chunk_size)
+        idx = idx % (len(self.annos["action"]) // self.chunk_size)
         # and then which chunk
         idx = idx * self.chunk_size
         if self._actions_only:
@@ -108,7 +110,7 @@ class RLBenchDataset(BaseDataset):
             "proprioception": self._get_proprioception(idx),  # tensor(1, 8)
             "action": self._get_action(idx),  # tensor(T, 8)
             "extrinsics": self._get_extrinsics(idx),  # tensor(n_cam3d, 4, 4)
-            "intrinsics": self._get_intrinsics(idx)  # tensor(n_cam3d, 3, 3)
+            "intrinsics": self._get_intrinsics(idx),  # tensor(n_cam3d, 3, 3)
         }
 
 
@@ -126,6 +128,7 @@ class HiveformerDataset(RLBenchDataset):
 
 class PeractDataset(RLBenchDataset):
     """RLBench dataset under Peract setup."""
+
     tasks = PERACT_TASKS
     cameras = ("left_shoulder", "right_shoulder", "wrist", "front")
     camera_inds = None
@@ -146,7 +149,7 @@ class PeractDataset(RLBenchDataset):
         }
         """
         # First detect which copy we fall into
-        idx = idx % (len(self.annos['action']) // self.chunk_size)
+        idx = idx % (len(self.annos["action"]) // self.chunk_size)
         # and then which chunk
         idx = idx * self.chunk_size
         if self._actions_only:
@@ -155,7 +158,7 @@ class PeractDataset(RLBenchDataset):
             "task": self._get_task(idx),  # [str]
             "instr": self._get_instr(idx),  # [str]
             "rgb": self._get_rgb(idx),  # tensor(n_cam3d, 3, H, W)
-            "pcd": self._get_attr_by_idx(idx, 'pcd', True),  # tensor(n_cam3d, H, W)
+            "pcd": self._get_attr_by_idx(idx, "pcd", True),  # tensor(n_cam3d, H, W)
             "proprioception": self._get_proprioception(idx),  # tensor(1, 8)
             "action": self._get_action(idx),  # tensor(T, 8)
         }
@@ -163,6 +166,7 @@ class PeractDataset(RLBenchDataset):
 
 class PeractTwoCamDataset(PeractDataset):
     """RLBench dataset under Peract setup."""
+
     tasks = PERACT_TASKS
     cameras = ("wrist", "front")
     camera_inds = [2, 3]
@@ -172,6 +176,7 @@ class PeractTwoCamDataset(PeractDataset):
 
 class Peract2Dataset(RLBenchDataset):
     """RLBench dataset under Peract2 setup."""
+
     tasks = PERACT2_TASKS
     cameras = ("front", "wrist_left", "wrist_right")
     camera_inds = None
@@ -181,6 +186,7 @@ class Peract2Dataset(RLBenchDataset):
 
 class Peract2SingleCamDataset(RLBenchDataset):
     """RLBench dataset under Peract2 setup."""
+
     tasks = PERACT2_TASKS
     cameras = ("front",)
     camera_inds = (0,)  # use only front camera

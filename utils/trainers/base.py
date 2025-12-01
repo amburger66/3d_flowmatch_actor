@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import trange, tqdm
+import wandb
 
 from modeling.encoder.text import fetch_tokenizers
 from ..common_utils import count_parameters
@@ -35,7 +36,7 @@ class BaseTrainTester:
             self.args.keypose_only,
             self.args.num_history,
             custom_imsize=self.args.custom_img_size,
-            depth2cloud=fetch_depth2cloud(self.args.dataset)
+            depth2cloud=fetch_depth2cloud(self.args.dataset),
         )
 
         if dist.get_rank() == 0 and not self.args.eval_only:
@@ -49,7 +50,7 @@ class BaseTrainTester:
             instructions=self.args.train_instructions,
             relative_action=self.args.relative_action,
             mem_limit=self.args.memory_limit,
-            chunk_size=self.args.chunk_size
+            chunk_size=self.args.chunk_size,
         )
         val_dataset = self.dataset_cls(
             root=self.args.eval_data_dir,
@@ -57,12 +58,13 @@ class BaseTrainTester:
             copies=1,
             relative_action=self.args.relative_action,
             mem_limit=0.1,
-            chunk_size=self.args.chunk_size
+            chunk_size=self.args.chunk_size,
         )
         return train_dataset, val_dataset
 
     def get_loaders(self):
         """Initialize data loaders."""
+
         def seed_worker(worker_id):
             worker_seed = torch.initial_seed() % 2**32
             np.random.seed(worker_seed)
@@ -86,7 +88,7 @@ class BaseTrainTester:
             drop_last=True,
             generator=g,
             prefetch_factor=4,
-            persistent_workers=True
+            persistent_workers=True,
         )
         # No sampler for val!
         if dist.get_rank() == 0:
@@ -100,7 +102,7 @@ class BaseTrainTester:
                 sampler=None,
                 drop_last=False,
                 prefetch_factor=4,
-                persistent_workers=True
+                persistent_workers=True,
             )
         else:
             val_loader = None
@@ -124,7 +126,7 @@ class BaseTrainTester:
             rotation_format=self.args.rotation_format,
             denoise_timesteps=self.args.denoise_timesteps,
             denoise_model=self.args.denoise_model,
-            lv2_batch_size=self.args.lv2_batch_size
+            lv2_batch_size=self.args.lv2_batch_size,
         )
 
         # Print basic modules' parameters
@@ -151,7 +153,7 @@ class BaseTrainTester:
             relative_action=self.args.relative_action,
             mem_limit=0.1,
             actions_only=True,
-            chunk_size=self.args.chunk_size
+            chunk_size=self.args.chunk_size,
         )
 
         data_loader = DataLoader(
@@ -159,7 +161,7 @@ class BaseTrainTester:
             batch_size=max(self.args.batch_size, 64) // self.args.chunk_size,
             collate_fn=actions_collate_fn,
             shuffle=False,
-            num_workers=self.args.num_workers
+            num_workers=self.args.num_workers,
         )
 
         # Loop and compute action min-max
@@ -178,13 +180,16 @@ class BaseTrainTester:
         """Initialize optimizer."""
         optimizer_grouped_parameters = [
             {"params": [], "weight_decay": 0.0, "lr": self.args.lr},
-            {"params": [], "weight_decay": self.args.wd, "lr": self.args.lr}
+            {"params": [], "weight_decay": self.args.wd, "lr": self.args.lr},
         ]
         if self.args.finetune_backbone:
-            optimizer_grouped_parameters.append({
-                "params": [], "weight_decay": self.args.wd,
-                "lr": self.args.backbone_lr
-            })
+            optimizer_grouped_parameters.append(
+                {
+                    "params": [],
+                    "weight_decay": self.args.wd,
+                    "lr": self.args.backbone_lr,
+                }
+            )
 
         # Collect names of all norm parameters
         norm_types = (
@@ -197,7 +202,7 @@ class BaseTrainTester:
             torch.nn.InstanceNorm2d,
             torch.nn.InstanceNorm3d,
             torch.nn.LocalResponseNorm,
-            torch.nn.RMSNorm
+            torch.nn.RMSNorm,
         )
         norm_param_names = set()
         for module_name, module in model.named_modules():
@@ -211,14 +216,11 @@ class BaseTrainTester:
                 continue
             if name in norm_param_names or name.endswith(".bias"):
                 optimizer_grouped_parameters[0]["params"].append(param)
-            elif self.args.finetune_backbone and 'backbone' in name:
+            elif self.args.finetune_backbone and "backbone" in name:
                 optimizer_grouped_parameters[2]["params"].append(param)
             else:
                 optimizer_grouped_parameters[1]["params"].append(param)
-        optimizer = optim.AdamW(
-            optimizer_grouped_parameters,
-            betas=(0.9, 0.95)
-        )
+        optimizer = optim.AdamW(optimizer_grouped_parameters, betas=(0.9, 0.95))
         return optimizer
 
     def main(self):
@@ -248,8 +250,10 @@ class BaseTrainTester:
         if self.args.use_compile:
             model.compute_loss = torch.compile(model.compute_loss, fullgraph=True)
         model = DistributedDataParallel(
-            model, device_ids=[self.args.local_rank],
-            broadcast_buffers=False, find_unused_parameters=True
+            model,
+            device_ids=[self.args.local_rank],
+            broadcast_buffers=False,
+            find_unused_parameters=True,
         )
 
         # Initialize EMA copy
@@ -269,8 +273,9 @@ class BaseTrainTester:
                 model.eval()
                 self.evaluate_nsteps(
                     ema_model if self.args.use_ema else model,
-                    val_loader, step_id=-1,
-                    val_iters=-1
+                    val_loader,
+                    step_id=-1,
+                    val_iters=-1,
                 )
             dist.barrier(device_ids=[torch.cuda.current_device()])
             return ema_model if self.args.use_ema else model
@@ -304,22 +309,27 @@ class BaseTrainTester:
             if (step_id + 1) % self.args.val_freq == 0 and dist.get_rank() == 0:
                 print("Train evaluation.......")
                 model.eval()
-                self.evaluate_nsteps(
+                metrics = self.evaluate_nsteps(
                     ema_model if self.args.use_ema else model,
-                    train_loader, step_id,
+                    train_loader,
+                    step_id,
                     val_iters=10,
-                    split='train'
+                    split="train",
                 )
                 print("Test evaluation.......")
-                new_loss = self.evaluate_nsteps(
+                val_metrics = self.evaluate_nsteps(
                     ema_model if self.args.use_ema else model,
-                    val_loader, step_id,
-                    val_iters=1250
+                    val_loader,
+                    step_id,
+                    val_iters=1250,
                 )
+                metrics.update(val_metrics)
+                wandb.log(metrics)
+
+                new_loss = -metrics[f"val-losses/mean/traj_pos_acc_001"]
                 # save model
                 best_loss = self.save_checkpoint(
-                    model, ema_model, optimizer, step_id,
-                    new_loss, best_loss
+                    model, ema_model, optimizer, step_id, new_loss, best_loss
                 )
                 model.train()
             dist.barrier(device_ids=[torch.cuda.current_device()])
@@ -338,8 +348,14 @@ class BaseTrainTester:
             instr = self.tokenizer(instr).cuda(non_blocking=True)
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             out = model(
-                action, action_mask, rgbs, rgb2d, pcds, instr, prop,
-                run_inference=not training
+                action,
+                action_mask,
+                rgbs,
+                rgb2d,
+                pcds,
+                instr,
+                prop,
+                run_inference=not training,
             )
         return out  # loss if training, else action
 
@@ -365,7 +381,7 @@ class BaseTrainTester:
         lr_scheduler.step()
 
     @torch.inference_mode()
-    def evaluate_nsteps(self, model, loader, step_id, val_iters, split='val'):
+    def evaluate_nsteps(self, model, loader, step_id, val_iters, split="val"):
         """Run a given number of evaluation steps."""
         values = {}
         device = next(model.parameters()).device
@@ -380,11 +396,11 @@ class BaseTrainTester:
             if self.args.relative_action:
                 pred_action = relative_to_absolute(
                     pred_action[:, :, 0],
-                    sample["proprioception"].cuda(non_blocking=True)[:, :, 0]
+                    sample["proprioception"].cuda(non_blocking=True)[:, :, 0],
                 )
                 gt_action = relative_to_absolute(
                     gt_action[:, :, 0],
-                    sample["proprioception"].cuda(non_blocking=True)[:, :, 0]
+                    sample["proprioception"].cuda(non_blocking=True)[:, :, 0],
                 )
 
             losses, losses_B = compute_metrics(pred_action, gt_action)
@@ -418,20 +434,18 @@ class BaseTrainTester:
             for key, value in values.items():
                 print(f"{key}: {value:.03f}")
 
-        return -values[f'{split}-losses/mean/traj_pos_acc_001']
+        return values
 
     def load_checkpoint(self, model, ema_model, optimizer):
         """Load from checkpoint."""
         print("=> trying checkpoint '{}'".format(self.args.checkpoint))
         if not os.path.exists(self.args.checkpoint):
-            print('Warning: checkpoint was not found, starting from scratch')
-            print('The main process will compute workspace bounds')
+            print("Warning: checkpoint was not found, starting from scratch")
+            print("The main process will compute workspace bounds")
             return 0, None
 
         model_dict = torch.load(
-            self.args.checkpoint,
-            map_location="cpu",
-            weights_only=True
+            self.args.checkpoint, map_location="cpu", weights_only=True
         )
         # Load weights flexibly
         msn, unxpct = model.load_state_dict(model_dict["weight"], strict=False)
@@ -447,20 +461,23 @@ class BaseTrainTester:
         if model_dict.get("ema_weight") is not None:
             ema_model.load_state_dict(model_dict["ema_weight"], strict=True)
         # Useful for resuming training
-        if 'optimizer' in model_dict and not self.args.eval_only:
+        if "optimizer" in model_dict and not self.args.eval_only:
             optimizer.load_state_dict(model_dict["optimizer"])
         start_iter = model_dict.get("iter", 0)
         best_loss = model_dict.get("best_loss", None)
 
-        print("=> loaded successfully '{}' (step {})".format(
-            self.args.checkpoint, model_dict.get("iter", 0)
-        ))
+        print(
+            "=> loaded successfully '{}' (step {})".format(
+                self.args.checkpoint, model_dict.get("iter", 0)
+            )
+        )
         del model_dict
         torch.cuda.empty_cache()
         return start_iter, best_loss
 
-    def save_checkpoint(self, model, ema_model, optimizer,
-                        step_id, new_loss, best_loss):
+    def save_checkpoint(
+        self, model, ema_model, optimizer, step_id, new_loss, best_loss
+    ):
         """Save checkpoint if requested."""
         model_state = model.state_dict()
         ema_state = ema_model.state_dict() if self.args.use_ema else None
@@ -468,30 +485,39 @@ class BaseTrainTester:
         # Best checkpoint
         if best_loss is None or new_loss <= best_loss:
             best_loss = new_loss
-            torch.save({
-                "weight": model_state,
-                "ema_weight": ema_state,
-                "iter": step_id + 1,
-                "best_loss": best_loss
-            }, self.args.log_dir / "best.pth")
+            torch.save(
+                {
+                    "weight": model_state,
+                    "ema_weight": ema_state,
+                    "iter": step_id + 1,
+                    "best_loss": best_loss,
+                },
+                self.args.log_dir / "best.pth",
+            )
 
         # Last checkpoint (always saved)
-        torch.save({
-            "weight": model_state,
-            "ema_weight": ema_state,
-            "optimizer": optimizer.state_dict(),
-            "iter": step_id + 1,
-            "best_loss": best_loss
-        }, self.args.log_dir / "last.pth")
+        torch.save(
+            {
+                "weight": model_state,
+                "ema_weight": ema_state,
+                "optimizer": optimizer.state_dict(),
+                "iter": step_id + 1,
+                "best_loss": best_loss,
+            },
+            self.args.log_dir / "last.pth",
+        )
 
         # Save intermediate checkpoints
         if (step_id + 1) % self.args.interm_ckpt_freq == 0:
-            torch.save({
-                "weight": model_state,
-                "ema_weight": ema_state,
-                "iter": step_id + 1,
-                "best_loss": best_loss
-            }, self.args.log_dir / f"interm{step_id + 1}.pth")
+            torch.save(
+                {
+                    "weight": model_state,
+                    "ema_weight": ema_state,
+                    "iter": step_id + 1,
+                    "best_loss": best_loss,
+                },
+                self.args.log_dir / f"interm{step_id + 1}.pth",
+            )
 
         return best_loss
 
@@ -510,13 +536,17 @@ def base_collate_fn(batch):
             _dict[key].extend(item[key])
 
     # Treat rest as tensors
-    _dict.update({
-        k_: (
-            torch.cat([item[k_] for item in batch])
-            if batch[0][k_] is not None else None
-        )
-        for k_ in batch[0].keys() if k_ not in list_keys
-    })
+    _dict.update(
+        {
+            k_: (
+                torch.cat([item[k_] for item in batch])
+                if batch[0][k_] is not None
+                else None
+            )
+            for k_ in batch[0].keys()
+            if k_ not in list_keys
+        }
+    )
 
     return _dict
 
